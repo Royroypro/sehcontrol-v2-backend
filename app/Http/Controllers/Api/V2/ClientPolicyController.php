@@ -37,10 +37,47 @@ class ClientPolicyController extends Controller
             ], 422);
         }
 
-        $device = Device::where('device_uid', $deviceUid)->first();
-        if (!$device) {
-            return response()->json(['reason' => 'device_not_found'], 404);
-        }
+$device = Device::where('device_uid', $deviceUid)->first();
+if (!$device) {
+    $now = Carbon::now();
+    $serverTime = $now->toIso8601String();
+    $notifyBeforeDays = (int) (config('sehcontrol.notify_before_days', 10));
+
+    // ✅ Soft deny (200) para que el agente pueda reaccionar (PAIR) sin quedar "sin policy"
+    $actions = [
+        'allow_run'          => false,
+        'force_close'        => true,
+        'lock_startup'       => false,
+        'show_message'       => true, // el agente la mostrará SOLO en seh_open (instant)
+        'message_title'      => 'Equipo no registrado',
+        'message_body'       => 'Este dispositivo no está registrado en el servidor. Vincúlelo con un código PAIR desde el panel.',
+        'message_level'      => 'warning',
+        'reason'             => 'device_not_found',
+        'days_left'          => null,
+        'notify_before_days' => $notifyBeforeDays,
+    ];
+
+    // config vacío (no aplicar toml cuando no existe device)
+    $cfg = [];
+
+    // 🔥 Ojo: aquí NO tenemos Device $device para policyResponse(), así que devolvemos JSON directo
+    return response()->json([
+        'policy_version'      => self::POLICY_VERSION,
+        'policy_ttl_seconds'  => self::POLICY_TTL_SECONDS,
+        'server_time'         => $serverTime,
+        'policy_fingerprint'  => hash('sha256', $this->stableJson([
+            'config'  => $cfg,
+            'actions' => $actions,
+        ])),
+        'config'              => $cfg,
+        'actions'             => $actions,
+        'subscription_state'  => 'device_not_found',
+        'reason'              => 'device_not_found',
+        'subscription'        => null,
+        'device'              => null,
+    ], 200);
+}
+
 
         if ((int) $device->customer_id !== (int) $user->customer_id) {
             return response()->json(['reason' => 'device_mismatch'], 403);
